@@ -81,9 +81,12 @@ function init() {
     updateGoals();
     
     // Initialize 3D earth - this is the cool part!
-    if (typeof Earth !== 'undefined') {
-        Earth.init();
-    }
+    // slight delay to make sure container is rendered
+    setTimeout(function() {
+        if (typeof Earth !== 'undefined') {
+            Earth.init();
+        }
+    }, 100);
     
     // debug: uncomment to see app data in console
     // console.log('App data:', appData);

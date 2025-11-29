@@ -20,13 +20,19 @@ const Earth = {
      */
     init: function() {
         const container = document.getElementById('earth-container');
-        if (!container) return;
+        if (!container) {
+            console.log('Earth container not found');
+            return;
+        }
 
         // Check if Three.js is loaded
         if (typeof THREE === 'undefined') {
-            console.error('Three.js not loaded');
+            console.error('Three.js not loaded, showing fallback');
+            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:4rem;">🌍</div>';
             return;
         }
+        
+        console.log('Initializing 3D Earth...');
 
         // Scene setup
         this.scene = new THREE.Scene();
@@ -56,6 +62,8 @@ const Earth = {
 
         // Handle resize
         window.addEventListener('resize', () => this.onResize());
+        
+        console.log('3D Earth initialized successfully');
     },
 
     /**
