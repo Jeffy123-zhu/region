@@ -1,832 +1,515 @@
 /**
- * EcoTrack - Personal Carbon Footprint Tracker
- * Main application JavaScript
+ * EcoTrack - Carbon Footprint Tracker
+ * Main Application JavaScript
  * 
- * @author Team EcoTrack
- * @version 1.0.0
- * @description Built for Region Hacks 2025 - KWC Region
+ * Built for Region Hacks 2025 - KWC Region
  * 
- * TODO: Add user authentication in future version
- * TODO: Connect to real carbon API for more accurate data
+ * Simplified version with 3 core pages:
+ * - Dashboard (stats + charts + earth)
+ * - Log Activity
+ * - KWC Resources
  */
 
-// Application state stored in localStorage
-// NOTE: we tried using IndexedDB first but localStorage was simpler for the hackathon
+// ============ DATA STORAGE ============
 const STORAGE_KEY = 'ecotrack_data';
 
-// Default data structure
 const defaultData = {
     daily: {},
     activities: [],
-    stats: {
-        totalLogged: 0,
-        ecoChoices: 0,
-        bikeTrips: 0,
-        plantMeals: 0
-    }
+    stats: { logged: 0, ecoChoices: 0 }
 };
 
-// Load data from localStorage or use defaults
-let appData = loadData();
+let data = loadData();
 
-/**
- * Load application data from localStorage
- * @returns {Object} Application data
- */
 function loadData() {
     try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-            return JSON.parse(stored);
-        }
-    } catch (error) {
-        console.error('Error loading data:', error);
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved ? JSON.parse(saved) : { ...defaultData };
+    } catch (e) {
+        return { ...defaultData };
     }
-    return { ...defaultData };
 }
 
-/**
- * Save application data to localStorage
- */
 function saveData() {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
-    } catch (error) {
-        console.error('Error saving data:', error);
-    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
-/**
- * Get today's date as ISO string (YYYY-MM-DD)
- * @returns {string} Today's date
- */
 function getTodayKey() {
     return new Date().toISOString().split('T')[0];
 }
 
-/**
- * Initialize the application
- * This runs when the page loads
- */
-function init() {
-    // console.log('EcoTrack initializing...');
-    
-    setupNavigation();
+// ============ INITIALIZATION ============
+document.addEventListener('DOMContentLoaded', function() {
+    setupNav();
     setupLogButtons();
-    updateCurrentDate();
+    updateDate();
     updateDashboard();
     initCharts();
-    updateInsights();
-    updateLocalStats();
-    updateGoals();
+    updateActivityList();
+    updateResources();
     
-    // Initialize 3D earth - this is the cool part!
-    // slight delay to make sure container is rendered
-    setTimeout(function() {
-        if (typeof Earth !== 'undefined') {
-            Earth.init();
-        }
-    }, 100);
-    
-    // debug: uncomment to see app data in console
-    // console.log('App data:', appData);
-}
+    // Initialize 3D Earth after a short delay
+    setTimeout(initEarth, 200);
+});
 
-/**
- * Setup navigation between pages
- */
-function setupNavigation() {
-    const navItems = document.querySelectorAll('.nav-item');
-    
-    navItems.forEach(item => {
+// ============ NAVIGATION ============
+function setupNav() {
+    document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', function() {
-            // Update active nav item
-            navItems.forEach(nav => nav.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             this.classList.add('active');
             
-            // Show corresponding page
-            const pageId = this.dataset.page;
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.remove('active');
-            });
-            document.getElementById(pageId).classList.add('active');
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(this.dataset.page).classList.add('active');
         });
     });
 }
 
-/**
- * Setup log activity buttons
- */
-function setupLogButtons() {
-    const buttons = document.querySelectorAll('.log-btn');
-    
-    buttons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const category = this.dataset.category;
-            const type = this.dataset.type;
-            const carbon = parseFloat(this.dataset.carbon);
-            
-            logActivity(category, type, carbon);
+function updateDate() {
+    const el = document.getElementById('current-date');
+    if (el) {
+        el.textContent = new Date().toLocaleDateString('en-US', {
+            weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
         });
-    });
-}
-
-/**
- * Update the current date display
- */
-function updateCurrentDate() {
-    const dateElement = document.getElementById('current-date');
-    if (dateElement) {
-        const options = { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-        };
-        dateElement.textContent = new Date().toLocaleDateString('en-US', options);
     }
 }
 
-/**
- * Log a new activity
- * @param {string} category - Activity category (transport, food, energy)
- * @param {string} type - Specific activity type
- * @param {number} carbon - Carbon value in kg
- * 
- * NOTE: carbon values are hardcoded for now, ideally would fetch from API
- */
-function logActivity(category, type, carbon) {
+// ============ LOG ACTIVITY ============
+function setupLogButtons() {
+    document.querySelectorAll('.log-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const cat = this.dataset.cat;
+            const type = this.dataset.type;
+            const co2 = parseFloat(this.dataset.co2);
+            logActivity(cat, type, co2);
+        });
+    });
+}
+
+function logActivity(category, type, co2) {
     const today = getTodayKey();
     
-    // sanity check - shouldn't happen but just in case
-    if (!category || !type) {
-        console.error('Missing category or type');
-        return;
+    // Initialize today if needed
+    if (!data.daily[today]) {
+        data.daily[today] = { transport: 0, food: 0, energy: 0, total: 0 };
     }
     
-    // Initialize today's data if needed
-    if (!appData.daily[today]) {
-        appData.daily[today] = {
-            transport: 0,
-            food: 0,
-            energy: 0,
-            total: 0
-        };
-    }
-    
-    // Update daily totals
-    appData.daily[today][category] += carbon;
-    appData.daily[today].total += carbon;
+    // Update totals
+    data.daily[today][category] += co2;
+    data.daily[today].total += co2;
     
     // Add to activity log
-    const activity = {
-        id: Date.now(),
-        date: today,
-        category: category,
-        type: type,
-        carbon: carbon,
-        timestamp: new Date().toISOString()
-    };
-    appData.activities.unshift(activity);
+    data.activities.unshift({
+        category, type, co2,
+        time: new Date().toISOString()
+    });
     
-    // Keep only last 100 activities
-    if (appData.activities.length > 100) {
-        appData.activities = appData.activities.slice(0, 100);
+    // Keep only last 50 activities
+    if (data.activities.length > 50) {
+        data.activities = data.activities.slice(0, 50);
     }
     
     // Update stats
-    appData.stats.totalLogged++;
-    if (carbon <= 0) {
-        appData.stats.ecoChoices++;
-    }
-    // count bike and walk as eco transport
-    if (type === 'bike' || type === 'walk') {
-        appData.stats.bikeTrips++;
-    }
-    // bus is also eco-friendly but we're not counting it here... maybe should?
-    if (type === 'vegan' || type === 'vegetarian') {
-        appData.stats.plantMeals++;
-    }
+    data.stats.logged++;
+    if (co2 <= 0) data.stats.ecoChoices++;
     
-    // Save and update UI
     saveData();
     updateDashboard();
     updateCharts();
     updateActivityList();
-    updateInsights();
-    updateLocalStats();
-    updateGoals();
+    updateResources();
     
     // Show feedback
-    const message = carbon <= 0 
-        ? 'Great eco-friendly choice!' 
-        : `Added ${carbon} kg CO2`;
-    showToast(message);
+    showToast(co2 <= 0 ? 'Great eco choice!' : `+${co2} kg CO2 logged`);
 }
 
-/**
- * Update dashboard statistics
- */
+// ============ DASHBOARD ============
 function updateDashboard() {
     const today = getTodayKey();
-    const todayData = appData.daily[today] || { transport: 0, food: 0, energy: 0, total: 0 };
+    const todayData = data.daily[today] || { transport: 0, food: 0, energy: 0, total: 0 };
     
-    // Update stat values with animation
-    animateValue('today-total', todayData.total);
-    animateValue('transport-total', todayData.transport);
-    animateValue('food-total', todayData.food);
-    animateValue('energy-total', todayData.energy);
+    // Update stat values
+    animateNum('today-total', todayData.total);
+    animateNum('transport-total', todayData.transport);
+    animateNum('food-total', todayData.food);
+    animateNum('energy-total', todayData.energy);
     
-    // Calculate daily change
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayKey = yesterday.toISOString().split('T')[0];
-    const yesterdayData = appData.daily[yesterdayKey];
-    
-    const changeElement = document.getElementById('daily-change');
-    if (changeElement && yesterdayData) {
-        const change = ((todayData.total - yesterdayData.total) / yesterdayData.total * 100).toFixed(0);
-        if (change < 0) {
-            changeElement.innerHTML = `<span>${change}% vs yesterday</span>`;
-            changeElement.className = 'stat-change positive';
-        } else if (change > 0) {
-            changeElement.innerHTML = `<span>+${change}% vs yesterday</span>`;
-            changeElement.className = 'stat-change negative';
+    // Update comparison text
+    const compEl = document.getElementById('comparison-text');
+    if (compEl) {
+        if (todayData.total === 0) {
+            compEl.textContent = 'Start logging to track';
+        } else if (todayData.total < 10) {
+            compEl.textContent = 'Below average - great job!';
+        } else if (todayData.total < 14.2) {
+            compEl.textContent = 'Below KWC average';
         } else {
-            changeElement.innerHTML = `<span>Same as yesterday</span>`;
-            changeElement.className = 'stat-change';
+            compEl.textContent = 'Above KWC average';
         }
     }
     
-    // Update impact metrics
-    updateImpactMetrics();
+    // Update impact stats
+    updateImpact();
 }
 
-/**
- * Animate a numeric value change
- * @param {string} elementId - Target element ID
- * @param {number} targetValue - Target value to animate to
- */
-function animateValue(elementId, targetValue) {
-    const element = document.getElementById(elementId);
-    if (!element) return;
+function animateNum(id, target) {
+    const el = document.getElementById(id);
+    if (!el) return;
     
-    const startValue = parseFloat(element.textContent) || 0;
-    const duration = 400;
+    const start = parseFloat(el.textContent) || 0;
+    const duration = 300;
     const startTime = performance.now();
     
-    function update(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // Ease out cubic
-        const eased = 1 - Math.pow(1 - progress, 3);
-        const current = startValue + (targetValue - startValue) * eased;
-        
-        element.textContent = current.toFixed(1);
-        
-        if (progress < 1) {
-            requestAnimationFrame(update);
-        }
+    function update(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const current = start + (target - start) * (1 - Math.pow(1 - progress, 3));
+        el.textContent = current.toFixed(1);
+        if (progress < 1) requestAnimationFrame(update);
     }
-    
     requestAnimationFrame(update);
 }
 
-/**
- * Update environmental impact metrics
- */
-function updateImpactMetrics() {
-    // Calculate monthly total
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    let monthlyTotal = 0;
+function updateImpact() {
+    // Calculate averages
+    const days = Object.keys(data.daily);
+    let total = 0;
+    days.forEach(d => total += data.daily[d].total || 0);
+    const avg = days.length > 0 ? total / days.length : 0;
     
-    Object.keys(appData.daily).forEach(dateKey => {
-        const date = new Date(dateKey);
-        if (date >= monthStart) {
-            monthlyTotal += appData.daily[dateKey].total || 0;
-        }
-    });
+    // Trees needed (1 tree absorbs ~21kg CO2/year)
+    const monthlyTotal = avg * 30;
+    const trees = Math.ceil(monthlyTotal * 12 / 21);
+    const treesEl = document.getElementById('trees-needed');
+    if (treesEl) treesEl.textContent = trees;
     
-    // Trees needed (1 tree absorbs ~21kg CO2 per year)
-    const treesNeeded = Math.ceil(monthlyTotal * 12 / 21);
-    const treesElement = document.getElementById('trees-equivalent');
-    if (treesElement) {
-        treesElement.textContent = treesNeeded;
-    }
-    
-    // Equivalent car km (average car emits ~0.21 kg CO2 per km)
-    const carKm = Math.round(monthlyTotal / 0.21);
-    const carElement = document.getElementById('car-km');
-    if (carElement) {
-        carElement.textContent = carKm;
-    }
-    
-    // KWC comparison (regional average is ~14.2 kg/day)
-    const days = Object.keys(appData.daily).length || 1;
-    const totalCarbon = Object.values(appData.daily).reduce((sum, day) => sum + (day.total || 0), 0);
-    const userAvg = totalCarbon / days;
-    const comparison = ((userAvg - 14.2) / 14.2 * 100).toFixed(0);
-    
-    const compElement = document.getElementById('kwc-comparison');
-    if (compElement) {
-        if (userAvg === 0) {
-            compElement.textContent = '--';
-        } else if (comparison < 0) {
-            compElement.textContent = `${Math.abs(comparison)}% below`;
+    // vs Average
+    const vsEl = document.getElementById('vs-average');
+    if (vsEl) {
+        if (avg === 0) {
+            vsEl.textContent = '--';
         } else {
-            compElement.textContent = `${comparison}% above`;
+            const diff = ((avg - 14.2) / 14.2 * 100).toFixed(0);
+            vsEl.textContent = diff < 0 ? `${Math.abs(diff)}% below` : `${diff}% above`;
         }
     }
+    
+    // Eco choices
+    const ecoEl = document.getElementById('eco-choices');
+    if (ecoEl) ecoEl.textContent = data.stats.ecoChoices;
 }
 
-// Chart instances
+// ============ CHARTS ============
 let weeklyChart = null;
 let categoryChart = null;
 
-/**
- * Initialize charts
- */
 function initCharts() {
-    initWeeklyChart();
-    initCategoryChart();
-}
-
-/**
- * Initialize weekly trend chart
- */
-function initWeeklyChart() {
-    const ctx = document.getElementById('weekly-chart');
-    if (!ctx) return;
-    
-    const labels = getLast7DaysLabels();
-    const data = getLast7DaysData();
-    
-    weeklyChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'CO2 (kg)',
-                data: data,
-                borderColor: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                fill: true,
-                tension: 0.4,
-                pointBackgroundColor: '#10b981',
-                pointBorderColor: '#ffffff',
-                pointBorderWidth: 2,
-                pointRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: false
-                }
+    // Weekly trend chart
+    const weeklyCtx = document.getElementById('weekly-chart');
+    if (weeklyCtx) {
+        weeklyChart = new Chart(weeklyCtx, {
+            type: 'line',
+            data: {
+                labels: getLast7Days(),
+                datasets: [{
+                    label: 'CO2 (kg)',
+                    data: getLast7DaysData(),
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#10b981'
+                }]
             },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: {
-                        color: 'rgba(148, 163, 184, 0.1)'
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { 
+                        beginAtZero: true,
+                        grid: { color: 'rgba(148,163,184,0.1)' },
+                        ticks: { color: '#94a3b8' }
                     },
-                    ticks: {
-                        color: '#94a3b8'
-                    }
-                },
-                x: {
-                    grid: {
-                        display: false
-                    },
-                    ticks: {
-                        color: '#94a3b8'
+                    x: { 
+                        grid: { display: false },
+                        ticks: { color: '#94a3b8' }
                     }
                 }
             }
-        }
-    });
-}
-
-/**
- * Initialize category breakdown chart
- */
-function initCategoryChart() {
-    const ctx = document.getElementById('category-chart');
-    if (!ctx) return;
+        });
+    }
     
-    const today = getTodayKey();
-    const todayData = appData.daily[today] || { transport: 0, food: 0, energy: 0 };
-    
-    categoryChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: ['Transport', 'Food', 'Energy'],
-            datasets: [{
-                data: [
-                    Math.max(todayData.transport, 0.1),
-                    Math.max(todayData.food, 0.1),
-                    Math.max(todayData.energy, 0.1)
-                ],
-                backgroundColor: ['#3b82f6', '#f59e0b', '#ef4444'],
-                borderWidth: 0,
-                hoverOffset: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: {
-                        color: '#94a3b8',
-                        padding: 15,
-                        usePointStyle: true
-                    }
-                }
+    // Category breakdown chart
+    const catCtx = document.getElementById('category-chart');
+    if (catCtx) {
+        const today = data.daily[getTodayKey()] || { transport: 0, food: 0, energy: 0 };
+        categoryChart = new Chart(catCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Transport', 'Food', 'Energy'],
+                datasets: [{
+                    data: [
+                        Math.max(today.transport, 0.1),
+                        Math.max(today.food, 0.1),
+                        Math.max(today.energy, 0.1)
+                    ],
+                    backgroundColor: ['#3b82f6', '#f59e0b', '#ef4444'],
+                    borderWidth: 0
+                }]
             },
-            cutout: '65%'
-        }
-    });
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: '#94a3b8', padding: 15 }
+                    }
+                },
+                cutout: '60%'
+            }
+        });
+    }
 }
 
-/**
- * Update charts with new data
- */
 function updateCharts() {
     if (weeklyChart) {
         weeklyChart.data.datasets[0].data = getLast7DaysData();
-        weeklyChart.update('active');
+        weeklyChart.update();
     }
     
     if (categoryChart) {
-        const today = getTodayKey();
-        const todayData = appData.daily[today] || { transport: 0, food: 0, energy: 0 };
+        const today = data.daily[getTodayKey()] || { transport: 0, food: 0, energy: 0 };
         categoryChart.data.datasets[0].data = [
-            Math.max(todayData.transport, 0.1),
-            Math.max(todayData.food, 0.1),
-            Math.max(todayData.energy, 0.1)
+            Math.max(today.transport, 0.1),
+            Math.max(today.food, 0.1),
+            Math.max(today.energy, 0.1)
         ];
-        categoryChart.update('active');
+        categoryChart.update();
     }
 }
 
-/**
- * Get labels for last 7 days
- * @returns {string[]} Array of day labels
- */
-function getLast7DaysLabels() {
+function getLast7Days() {
     const labels = [];
     for (let i = 6; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        labels.push(date.toLocaleDateString('en-US', { weekday: 'short' }));
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        labels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
     }
     return labels;
 }
 
-/**
- * Get data for last 7 days
- * @returns {number[]} Array of daily totals
- */
 function getLast7DaysData() {
-    const data = [];
+    const values = [];
     for (let i = 6; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateKey = date.toISOString().split('T')[0];
-        data.push(appData.daily[dateKey]?.total || 0);
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        values.push(data.daily[key]?.total || 0);
     }
-    return data;
+    return values;
 }
 
-/**
- * Update the recent activity list
- */
+// ============ ACTIVITY LIST ============
+const typeNames = {
+    car: 'Car Trip', bus: 'Bus Trip', bike: 'Bicycle', walk: 'Walking',
+    beef: 'Beef Meal', chicken: 'Chicken', vegetarian: 'Vegetarian', vegan: 'Vegan',
+    heating: 'Heating', ac: 'AC', laundry: 'Laundry', unplug: 'Unplugged Devices'
+};
+
 function updateActivityList() {
-    const listElement = document.getElementById('activity-list');
-    if (!listElement) return;
+    const list = document.getElementById('activity-list');
+    if (!list) return;
     
-    const recentActivities = appData.activities.slice(0, 10);
-    
-    if (recentActivities.length === 0) {
-        listElement.innerHTML = '<p class="empty-state">No activities logged yet. Start tracking above.</p>';
+    if (data.activities.length === 0) {
+        list.innerHTML = '<p class="empty-msg">No activities logged yet</p>';
         return;
     }
     
-    const activityNames = {
-        car: 'Car Trip',
-        bus: 'Bus Trip',
-        bike: 'Bicycle',
-        walk: 'Walking',
-        beef: 'Beef Meal',
-        chicken: 'Chicken Meal',
-        vegetarian: 'Vegetarian Meal',
-        vegan: 'Vegan Meal',
-        ac: 'Air Conditioning',
-        heating: 'Heating',
-        laundry: 'Laundry',
-        solar: 'Solar Energy'
-    };
-    
-    listElement.innerHTML = recentActivities.map(activity => {
-        const time = new Date(activity.timestamp);
-        const timeStr = time.toLocaleTimeString('en-US', { 
-            hour: 'numeric', 
-            minute: '2-digit' 
-        });
-        const carbonClass = activity.carbon > 0 ? 'positive' : 'negative';
-        const carbonStr = activity.carbon > 0 
-            ? `+${activity.carbon.toFixed(1)}` 
-            : activity.carbon.toFixed(1);
-        
+    list.innerHTML = data.activities.slice(0, 10).map(a => {
+        const time = new Date(a.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const co2Class = a.co2 > 0 ? 'positive' : 'negative';
+        const co2Text = a.co2 > 0 ? `+${a.co2.toFixed(1)}` : a.co2.toFixed(1);
         return `
             <div class="activity-item">
                 <div class="activity-info">
-                    <span class="activity-type">${activityNames[activity.type] || activity.type}</span>
-                    <span class="activity-time">${timeStr}</span>
+                    <span class="activity-type">${typeNames[a.type] || a.type}</span>
+                    <span class="activity-time">${time}</span>
                 </div>
-                <span class="activity-carbon ${carbonClass}">${carbonStr} kg</span>
+                <span class="activity-co2 ${co2Class}">${co2Text} kg</span>
             </div>
         `;
     }).join('');
 }
 
-/**
- * Update insights based on user data
- */
-function updateInsights() {
-    const today = getTodayKey();
-    const todayData = appData.daily[today] || { transport: 0, food: 0, energy: 0, total: 0 };
-    const stats = appData.stats;
+// ============ RESOURCES PAGE ============
+function updateResources() {
+    const days = Object.keys(data.daily);
+    let total = 0;
+    days.forEach(d => total += data.daily[d].total || 0);
+    const avg = days.length > 0 ? total / days.length : 0;
     
-    // Transport insight
-    const transportInsight = document.getElementById('transport-insight');
-    const transportBadge = document.getElementById('transport-badge');
-    if (transportInsight && transportBadge) {
-        if (stats.bikeTrips >= 5) {
-            transportInsight.textContent = 'Excellent! You are making great use of eco-friendly transportation. Keep cycling and walking to maintain your low carbon footprint.';
-            transportBadge.textContent = 'Great';
-            transportBadge.style.background = 'rgba(16, 185, 129, 0.2)';
-            transportBadge.style.color = '#10b981';
-        } else if (todayData.transport > 3) {
-            transportInsight.textContent = 'Your transportation emissions are above average today. Consider using GRT transit or cycling for your next trip to reduce your footprint.';
-            transportBadge.textContent = 'High';
-            transportBadge.style.background = 'rgba(239, 68, 68, 0.2)';
-            transportBadge.style.color = '#ef4444';
-        } else {
-            transportInsight.textContent = 'Your transportation choices are reasonable. Try the Iron Horse Trail for a zero-emission commute between Kitchener and Waterloo.';
-            transportBadge.textContent = 'OK';
-        }
-    }
-    
-    // Food insight
-    const foodInsight = document.getElementById('food-insight');
-    const foodBadge = document.getElementById('food-badge');
-    if (foodInsight && foodBadge) {
-        if (stats.plantMeals >= 7) {
-            foodInsight.textContent = 'Your plant-based choices are making a significant impact. A vegetarian diet can reduce food-related emissions by up to 50%.';
-            foodBadge.textContent = 'Great';
-            foodBadge.style.background = 'rgba(16, 185, 129, 0.2)';
-            foodBadge.style.color = '#10b981';
-        } else if (todayData.food > 5) {
-            foodInsight.textContent = 'High-impact food choices detected. Beef has the highest carbon footprint of common foods. Try replacing one beef meal with chicken or vegetables.';
-            foodBadge.textContent = 'High';
-            foodBadge.style.background = 'rgba(239, 68, 68, 0.2)';
-            foodBadge.style.color = '#ef4444';
-        } else {
-            foodInsight.textContent = 'Your diet has moderate impact. Visit the Kitchener Market for local produce with lower transportation emissions.';
-            foodBadge.textContent = 'OK';
-        }
-    }
-    
-    // Energy insight
-    const energyInsight = document.getElementById('energy-insight');
-    const energyBadge = document.getElementById('energy-badge');
-    if (energyInsight && energyBadge) {
-        if (todayData.energy < 1) {
-            energyInsight.textContent = 'Your energy usage is efficient. Continue monitoring your consumption to maintain these good habits.';
-            energyBadge.textContent = 'Low';
-            energyBadge.style.background = 'rgba(16, 185, 129, 0.2)';
-            energyBadge.style.color = '#10b981';
-        } else if (todayData.energy > 3) {
-            energyInsight.textContent = 'High energy consumption today. Consider lowering your thermostat by 1 degree or reducing AC usage to save energy.';
-            energyBadge.textContent = 'High';
-            energyBadge.style.background = 'rgba(239, 68, 68, 0.2)';
-            energyBadge.style.color = '#ef4444';
-        } else {
-            energyInsight.textContent = 'Your energy usage is average. Small changes like unplugging devices when not in use can reduce standby power consumption.';
-            energyBadge.textContent = 'OK';
-        }
-    }
-    
-    // Top recommendation
-    const topRec = document.getElementById('top-recommendation');
-    if (topRec) {
-        if (stats.totalLogged === 0) {
-            topRec.textContent = 'Start logging your daily activities to receive personalized recommendations for reducing your carbon footprint.';
-        } else if (todayData.transport > todayData.food && todayData.transport > todayData.energy) {
-            topRec.textContent = 'Transportation is your biggest impact area today. The GRT bus system can reduce your commute emissions by up to 65% compared to driving alone.';
-        } else if (todayData.food > todayData.energy) {
-            topRec.textContent = 'Food choices are your main impact today. Reducing beef consumption by one meal per week can save over 300 kg CO2 annually.';
-        } else {
-            topRec.textContent = 'Great job tracking your footprint! Focus on maintaining your eco-friendly habits and try to stay under 10 kg CO2 per day.';
-        }
-    }
+    const avgEl = document.getElementById('your-avg');
+    if (avgEl) avgEl.textContent = avg.toFixed(1);
 }
 
-/**
- * Update KWC local statistics
- */
-function updateLocalStats() {
-    const days = Object.keys(appData.daily).length || 1;
-    const totalCarbon = Object.values(appData.daily).reduce((sum, day) => sum + (day.total || 0), 0);
-    const userAvg = totalCarbon / days;
+// ============ 3D EARTH ============
+function initEarth() {
+    const container = document.getElementById('earth-container');
+    if (!container) return;
     
-    const avgElement = document.getElementById('user-daily-avg');
-    if (avgElement) {
-        avgElement.textContent = userAvg.toFixed(1);
+    // Check if Three.js loaded
+    if (typeof THREE === 'undefined') {
+        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:4rem;">🌍</div>';
+        return;
     }
+    
+    // Scene
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.z = 12;
+    
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+    
+    // Earth
+    const earthGeo = new THREE.SphereGeometry(5, 64, 64);
+    const earthMat = new THREE.MeshPhongMaterial({
+        color: 0x1a8f5c,
+        emissive: 0x072534,
+        shininess: 25
+    });
+    const earth = new THREE.Mesh(earthGeo, earthMat);
+    scene.add(earth);
+    
+    // Wireframe overlay
+    const wireGeo = new THREE.SphereGeometry(5.02, 32, 32);
+    const wireMat = new THREE.MeshBasicMaterial({
+        color: 0x2dd4bf,
+        transparent: true,
+        opacity: 0.15,
+        wireframe: true
+    });
+    const wire = new THREE.Mesh(wireGeo, wireMat);
+    earth.add(wire);
+    
+    // Atmosphere glow
+    const atmoGeo = new THREE.SphereGeometry(5.3, 64, 64);
+    const atmoMat = new THREE.MeshBasicMaterial({
+        color: 0x3b82f6,
+        transparent: true,
+        opacity: 0.08,
+        side: THREE.BackSide
+    });
+    const atmo = new THREE.Mesh(atmoGeo, atmoMat);
+    scene.add(atmo);
+    
+    // Particles
+    const particleCount = 400;
+    const positions = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount * 3; i += 3) {
+        const r = 7 + Math.random() * 2.5;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        positions[i] = r * Math.sin(phi) * Math.cos(theta);
+        positions[i+1] = r * Math.sin(phi) * Math.sin(theta);
+        positions[i+2] = r * Math.cos(phi);
+    }
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const particleMat = new THREE.PointsMaterial({ color: 0x10b981, size: 0.06, transparent: true, opacity: 0.5 });
+    const particles = new THREE.Points(particleGeo, particleMat);
+    scene.add(particles);
+    
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const sun = new THREE.PointLight(0xffffff, 1.2);
+    sun.position.set(15, 10, 15);
+    scene.add(sun);
+    
+    // Animation
+    function animate() {
+        requestAnimationFrame(animate);
+        earth.rotation.y += 0.002;
+        particles.rotation.y -= 0.0005;
+        renderer.render(scene, camera);
+    }
+    animate();
+    
+    // Resize handler
+    window.addEventListener('resize', () => {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    });
 }
 
-/**
- * Update goals and challenges progress
- */
-function updateGoals() {
-    const stats = appData.stats;
-    
-    // Transport challenge (5 eco trips)
-    const transportProgress = Math.min(stats.bikeTrips / 5 * 100, 100);
-    const transportFill = document.getElementById('transport-progress');
-    const transportText = document.getElementById('transport-progress-text');
-    if (transportFill) transportFill.style.width = transportProgress + '%';
-    if (transportText) transportText.textContent = `${Math.min(stats.bikeTrips, 5)}/5 trips`;
-    
-    // Food challenge (7 plant meals)
-    const foodProgress = Math.min(stats.plantMeals / 7 * 100, 100);
-    const foodFill = document.getElementById('food-progress');
-    const foodText = document.getElementById('food-progress-text');
-    if (foodFill) foodFill.style.width = foodProgress + '%';
-    if (foodText) foodText.textContent = `${Math.min(stats.plantMeals, 7)}/7 meals`;
-    
-    // Overall challenge (under 10kg avg)
-    const days = Object.keys(appData.daily).length || 1;
-    const totalCarbon = Object.values(appData.daily).reduce((sum, day) => sum + (day.total || 0), 0);
-    const avgCarbon = totalCarbon / days;
-    const overallProgress = avgCarbon > 0 ? Math.min((10 / avgCarbon) * 100, 100) : 0;
-    const overallFill = document.getElementById('overall-progress');
-    const overallText = document.getElementById('overall-progress-text');
-    if (overallFill) overallFill.style.width = overallProgress + '%';
-    if (overallText) overallText.textContent = avgCarbon > 0 ? `${avgCarbon.toFixed(1)} kg avg` : '-- kg avg';
-    
-    // Update user score
-    let score = stats.totalLogged * 10;
-    score += stats.ecoChoices * 25;
-    score += stats.bikeTrips * 15;
-    score += stats.plantMeals * 20;
-    
-    const scoreElement = document.getElementById('user-score');
-    const rankElement = document.getElementById('user-rank');
-    if (scoreElement) scoreElement.textContent = score.toLocaleString() + ' pts';
-    if (rankElement) {
-        if (score > 2450) rankElement.textContent = '1';
-        else if (score > 2180) rankElement.textContent = '2';
-        else if (score > 1920) rankElement.textContent = '3';
-        else if (score > 0) rankElement.textContent = '4';
-        else rankElement.textContent = '--';
-    }
-    
-    // Update achievements
-    updateAchievements();
-}
-
-/**
- * Update achievement status
- */
-function updateAchievements() {
-    const stats = appData.stats;
-    
-    // First step achievement
-    if (stats.totalLogged > 0) {
-        document.getElementById('ach-first')?.classList.add('unlocked');
-    }
-    
-    // Cyclist achievement (10 bike trips)
-    if (stats.bikeTrips >= 10) {
-        document.getElementById('ach-cyclist')?.classList.add('unlocked');
-    }
-    
-    // Plant powered achievement (15 plant meals)
-    if (stats.plantMeals >= 15) {
-        document.getElementById('ach-plant')?.classList.add('unlocked');
-    }
-    
-    // Carbon saver achievement (50 eco choices)
-    if (stats.ecoChoices >= 50) {
-        document.getElementById('ach-saver')?.classList.add('unlocked');
-    }
-}
-
-/**
- * Show toast notification
- * @param {string} message - Message to display
- */
-function showToast(message) {
+// ============ TOAST ============
+function showToast(msg) {
     const toast = document.getElementById('toast');
     if (!toast) return;
-    
-    toast.textContent = message;
+    toast.textContent = msg;
     toast.classList.add('show');
-    
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 2500);
+    setTimeout(() => toast.classList.remove('show'), 2500);
 }
 
-/**
- * Load demo data for presentation
- */
-function loadDemoData() {
-    const demoData = {
-        daily: {},
-        activities: [],
-        stats: {
-            totalLogged: 28,
-            ecoChoices: 12,
-            bikeTrips: 6,
-            plantMeals: 8
-        }
-    };
-    
-    // Generate 7 days of realistic data
-    for (let i = 6; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateKey = date.toISOString().split('T')[0];
-        
-        // Randomize daily values with realistic ranges
-        const transport = Math.random() * 3 + 0.5;
-        const food = Math.random() * 4 + 1;
-        const energy = Math.random() * 2 + 0.3;
-        
-        demoData.daily[dateKey] = {
-            transport: parseFloat(transport.toFixed(1)),
-            food: parseFloat(food.toFixed(1)),
-            energy: parseFloat(energy.toFixed(1)),
-            total: parseFloat((transport + food + energy).toFixed(1))
-        };
-    }
-    
-    // Add sample activities
-    const sampleActivities = [
-        { category: 'transport', type: 'bike', carbon: 0 },
-        { category: 'food', type: 'vegetarian', carbon: 0.5 },
-        { category: 'transport', type: 'bus', carbon: 0.8 },
-        { category: 'food', type: 'chicken', carbon: 1.8 },
-        { category: 'energy', type: 'laundry', carbon: 0.6 }
-    ];
-    
-    sampleActivities.forEach((activity, index) => {
-        const time = new Date();
-        time.setHours(time.getHours() - index * 2);
-        demoData.activities.push({
-            id: Date.now() - index,
-            date: getTodayKey(),
-            ...activity,
-            timestamp: time.toISOString()
-        });
-    });
-    
-    appData = demoData;
-    saveData();
-    
-    // Refresh all UI components
-    updateDashboard();
-    updateCharts();
-    updateActivityList();
-    updateInsights();
-    updateLocalStats();
-    updateGoals();
-    
-    showToast('Demo data loaded successfully');
-}
-
-// Keyboard shortcut for demo data (Ctrl+D)
-// useful for testing and presentations
-document.addEventListener('keydown', function(event) {
-    if (event.ctrlKey && event.key === 'd') {
-        event.preventDefault();
+// ============ DEMO DATA ============
+// Press Ctrl+D to load demo data
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'd') {
+        e.preventDefault();
         loadDemoData();
     }
 });
 
-// Initialize application when DOM is ready
-document.addEventListener('DOMContentLoaded', init);
-
-// just for debugging - remove before final submission
-// window.appData = appData;
-// window.loadDemoData = loadDemoData;
+function loadDemoData() {
+    const demo = {
+        daily: {},
+        activities: [],
+        stats: { logged: 25, ecoChoices: 10 }
+    };
+    
+    // Generate 7 days of data
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        
+        const transport = Math.random() * 3 + 0.5;
+        const food = Math.random() * 4 + 1;
+        const energy = Math.random() * 2 + 0.3;
+        
+        demo.daily[key] = {
+            transport: +transport.toFixed(1),
+            food: +food.toFixed(1),
+            energy: +energy.toFixed(1),
+            total: +(transport + food + energy).toFixed(1)
+        };
+    }
+    
+    // Sample activities
+    const samples = [
+        { category: 'transport', type: 'bike', co2: 0 },
+        { category: 'food', type: 'vegetarian', co2: 0.5 },
+        { category: 'transport', type: 'bus', co2: 0.8 },
+        { category: 'food', type: 'chicken', co2: 1.8 },
+        { category: 'energy', type: 'laundry', co2: 0.6 }
+    ];
+    samples.forEach((s, i) => {
+        const t = new Date();
+        t.setHours(t.getHours() - i * 2);
+        demo.activities.push({ ...s, time: t.toISOString() });
+    });
+    
+    data = demo;
+    saveData();
+    updateDashboard();
+    updateCharts();
+    updateActivityList();
+    updateResources();
+    showToast('Demo data loaded!');
+}
