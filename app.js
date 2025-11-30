@@ -78,6 +78,10 @@ function updateDate() {
 function setupLogButtons() {
     document.querySelectorAll('.log-btn').forEach(btn => {
         btn.addEventListener('click', function() {
+            // Add click animation
+            this.classList.add('clicked');
+            setTimeout(() => this.classList.remove('clicked'), 300);
+            
             const cat = this.dataset.cat;
             const type = this.dataset.type;
             const co2 = parseFloat(this.dataset.co2);
