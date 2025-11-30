@@ -288,6 +288,15 @@ body {
     width: 100%;
     height: 280px;
     background: linear-gradient(180deg, #0a1628 0%, #1a2744 100%);
+    position: relative;
+}
+
+#earth-container canvas {
+    display: block;
+}
+
+.earth-status {
+    transition: color 0.5s ease;
 }
 
 

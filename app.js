@@ -118,6 +118,7 @@ function logActivity(category, type, co2) {
     updateCharts();
     updateActivityList();
     updateResources();
+    updateEarthHealth();  // Update earth color based on new data
     
     // Show feedback
     showToast(co2 <= 0 ? 'Great eco choice!' : `+${co2} kg CO2 logged`);
@@ -355,6 +356,11 @@ function updateResources() {
 }
 
 // ============ 3D EARTH ============
+// Global reference so we can update earth color
+let earthMaterial = null;
+let atmosphereMaterial = null;
+let particleMaterial = null;
+
 function initEarth() {
     const container = document.getElementById('earth-container');
     if (!container) return;
@@ -376,14 +382,14 @@ function initEarth() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
     
-    // Earth
+    // Earth - color will change based on carbon footprint
     const earthGeo = new THREE.SphereGeometry(5, 64, 64);
-    const earthMat = new THREE.MeshPhongMaterial({
-        color: 0x1a8f5c,
+    earthMaterial = new THREE.MeshPhongMaterial({
+        color: 0x1a8f5c,  // green = healthy
         emissive: 0x072534,
         shininess: 25
     });
-    const earth = new THREE.Mesh(earthGeo, earthMat);
+    const earth = new THREE.Mesh(earthGeo, earthMaterial);
     scene.add(earth);
     
     // Wireframe overlay
@@ -397,18 +403,18 @@ function initEarth() {
     const wire = new THREE.Mesh(wireGeo, wireMat);
     earth.add(wire);
     
-    // Atmosphere glow
+    // Atmosphere glow - changes with health
     const atmoGeo = new THREE.SphereGeometry(5.3, 64, 64);
-    const atmoMat = new THREE.MeshBasicMaterial({
-        color: 0x3b82f6,
+    atmosphereMaterial = new THREE.MeshBasicMaterial({
+        color: 0x10b981,  // green glow = healthy
         transparent: true,
-        opacity: 0.08,
+        opacity: 0.12,
         side: THREE.BackSide
     });
-    const atmo = new THREE.Mesh(atmoGeo, atmoMat);
+    const atmo = new THREE.Mesh(atmoGeo, atmosphereMaterial);
     scene.add(atmo);
     
-    // Particles
+    // Particles - color changes with health
     const particleCount = 400;
     const positions = new Float32Array(particleCount * 3);
     for (let i = 0; i < particleCount * 3; i += 3) {
@@ -421,8 +427,8 @@ function initEarth() {
     }
     const particleGeo = new THREE.BufferGeometry();
     particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const particleMat = new THREE.PointsMaterial({ color: 0x10b981, size: 0.06, transparent: true, opacity: 0.5 });
-    const particles = new THREE.Points(particleGeo, particleMat);
+    particleMaterial = new THREE.PointsMaterial({ color: 0x10b981, size: 0.06, transparent: true, opacity: 0.5 });
+    const particles = new THREE.Points(particleGeo, particleMaterial);
     scene.add(particles);
     
     // Lights
@@ -446,6 +452,98 @@ function initEarth() {
         camera.updateProjectionMatrix();
         renderer.setSize(container.clientWidth, container.clientHeight);
     });
+    
+    // Set initial earth color based on existing data
+    setTimeout(updateEarthHealth, 100);
+}
+
+// ============ UPDATE EARTH BASED ON CARBON ============
+// Earth changes color based on today's carbon footprint
+// Low carbon = green & glowing | High carbon = red & dim
+function updateEarthHealth() {
+    if (!earthMaterial || !atmosphereMaterial || !particleMaterial) return;
+    
+    const today = data.daily[getTodayKey()] || { total: 0 };
+    const todayTotal = today.total;
+    
+    // Calculate health: 0 = perfect, 1 = bad
+    // Under 5kg = great, 5-10 = ok, 10-15 = warning, 15+ = bad
+    let health = Math.min(todayTotal / 20, 1); // 0 to 1
+    
+    // Interpolate colors
+    // Green (healthy): 0x1a8f5c -> Red (unhealthy): 0x8f1a1a
+    const greenR = 0x1a, greenG = 0x8f, greenB = 0x5c;
+    const redR = 0xbf, redG = 0x2a, redB = 0x2a;
+    
+    const r = Math.round(greenR + (redR - greenR) * health);
+    const g = Math.round(greenG + (redG - greenG) * health);
+    const b = Math.round(greenB + (redB - greenB) * health);
+    
+    const newColor = (r << 16) | (g << 8) | b;
+    
+    // Update earth color
+    earthMaterial.color.setHex(newColor);
+    
+    // Update atmosphere - green glow when healthy, red/orange when not
+    if (health < 0.3) {
+        atmosphereMaterial.color.setHex(0x10b981); // green glow
+        atmosphereMaterial.opacity = 0.15;
+    } else if (health < 0.6) {
+        atmosphereMaterial.color.setHex(0xf59e0b); // yellow/orange
+        atmosphereMaterial.opacity = 0.12;
+    } else {
+        atmosphereMaterial.color.setHex(0xef4444); // red warning
+        atmosphereMaterial.opacity = 0.18;
+    }
+    
+    // Update particles
+    particleMaterial.color.setHex(health < 0.5 ? 0x10b981 : 0xf59e0b);
+    
+    // Update the status text below earth
+    updateEarthStatus(todayTotal, health);
+}
+
+function updateEarthStatus(total, health) {
+    const container = document.getElementById('earth-container');
+    if (!container) return;
+    
+    // Remove old status if exists
+    let status = container.querySelector('.earth-status');
+    if (!status) {
+        status = document.createElement('div');
+        status.className = 'earth-status';
+        container.appendChild(status);
+    }
+    
+    let message, color;
+    if (total === 0) {
+        message = "Start logging to see Earth's health";
+        color = '#94a3b8';
+    } else if (health < 0.25) {
+        message = "Earth is thriving! Great choices!";
+        color = '#10b981';
+    } else if (health < 0.5) {
+        message = "Earth is doing okay";
+        color = '#3b82f6';
+    } else if (health < 0.75) {
+        message = "Earth needs your help";
+        color = '#f59e0b';
+    } else {
+        message = "High emissions - Earth is struggling";
+        color = '#ef4444';
+    }
+    
+    status.textContent = message;
+    status.style.cssText = `
+        position: absolute;
+        bottom: 10px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 0.75rem;
+        color: ${color};
+        font-weight: 500;
+    `;
 }
 
 // ============ TOAST ============
@@ -511,5 +609,6 @@ function loadDemoData() {
     updateCharts();
     updateActivityList();
     updateResources();
+    updateEarthHealth();  // Update earth with demo data
     showToast('Demo data loaded!');
 }
